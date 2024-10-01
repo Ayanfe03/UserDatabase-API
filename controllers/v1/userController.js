@@ -1,13 +1,20 @@
+const bcrypt = require('bcryptjs');
+const dotenv = require('dotenv');
+const jwt = require('jsonwebtoken');
 const User = require('../../models/User');
 
-// const users = []; // simulated database
+// const users = []; // simulated database, no longer in use, now using real PostgreSQL database
+
+// loads the environmental variables from the .env file
+dotenv.config();
+
 
 // @desc POST Create a new user
 // @route POST /v1/users
 // @access Public
 const createUserHandler = async (req, res) => {
   try {
-    let { name, gender, age, email } = req.body;
+    let { name, gender, age, email, password } = req.body;
     const lowerCaseGender = gender.toLowerCase();
 
     if (typeof name !== 'string') {
@@ -38,7 +45,17 @@ const createUserHandler = async (req, res) => {
       res.status(400).json({ message: 'You must be at least 15 years old to register' });
       return;
     }
-    const user = User.build({ name: name, gender: lowerCaseGender, email: email, age: age });
+
+    if (typeof password !== 'string') {
+      res.status(400).json({ message: 'Password must be a string' });
+      return;
+    } else if (password.length < 8) {
+      res.status(400).json({ message: 'Password must be at least 8 characters long' });
+      return;
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = User.build({ name: name, gender: lowerCaseGender, email: email, age: age, password: hashedPassword });
     await user.save();
     res.status(201).json({ message: 'User Created Successfully', user });
     return;
@@ -58,7 +75,7 @@ const getUsersHandler = async (req, res) => {
   } catch(error) {
     res.status(500).json({ message: error.message });
   }
-}
+};
 
 // @desc GET Retrieves a user
 // @route GET /v1/users/:id
@@ -80,7 +97,7 @@ const getUserHandler = async (req, res) => {
   } catch(error) {
     res.status(500).json({ message: error.message });
   }
-}
+};
 
 // @desc PUT Updates a user
 // @route PUT /v1/users/:id
@@ -141,7 +158,7 @@ const updateUserHandler = async (req, res) => {
     } catch (error) {
       res.status(500).json({ message: error.message });
     }
-}
+};
 
 // @desc DELETE Deletes a user
 // @route DELETE /v1/users/:id
@@ -165,13 +182,43 @@ const deleteUserHandler = async (req, res) => {
   } catch(error) {
     res.status(500).json({ message: error.message });
   }
-}
+};
 
+// @desc POST Login user
+// @route POST /v1/users/login
+// @access Public
+const loginUserHandler = async (req, res) => {
+    const { email, password } = req.body;
+    const SECRET_KEY = process.env.JWT_SECRET_KEY
+
+    const user = await User.findOne({ where: { email : email } });
+
+    if (!user) {
+      res.status(404).json({ message: 'User does not exist' });
+      return; 
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      res.status(400).json({ message: 'Invalid password' });
+      return;
+    }
+    const payload = {
+      id: user.id,
+      email: user.email,
+    }
+
+    const accessToken = jwt.sign(payload, SECRET_KEY, { expiresIn: '1h' });
+    const refreshToken = jwt.sign(payload, SECRET_KEY, { expiresIn: '7d' });
+
+    res.status(200).json({ accessToken, refreshToken });
+};
 
 module.exports = {
   createUserHandler,
   getUsersHandler,
   getUserHandler,
   updateUserHandler,
-  deleteUserHandler 
+  deleteUserHandler,
+  loginUserHandler
 }
